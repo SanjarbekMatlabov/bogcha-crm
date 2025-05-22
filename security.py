@@ -3,7 +3,7 @@ from typing import Optional, Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+from jose import ExpiredSignatureError, JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
@@ -105,3 +105,19 @@ async def get_authenticated_user(
     current_user: Annotated[database.User, Depends(get_current_active_user)]
 ) -> database.User:
     return current_user
+def decode_username_from_token(token: str) -> Optional[str]:
+    """
+    Berilgan JWT tokendan foydalanuvchi nomini (sub claim) ajratib oladi.
+    Agar token yaroqsiz yoki muddati o'tgan bo'lsa, None qaytaradi.
+    """
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: Optional[str] = payload.get("sub")
+        return username
+    except ExpiredSignatureError:
+        print("Token muddati o'tgan (log uchun)") # Buni loglash mumkin
+        return "expired_token" # Maxsus qiymat qaytarish mumkin
+    except JWTError:
+        print("Token validatsiya xatosi (log uchun)") # Buni loglash mumkin
+        return "invalid_token" # Maxsus qiymat qaytarish mumkin
+    return None

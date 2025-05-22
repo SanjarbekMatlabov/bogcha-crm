@@ -1,8 +1,9 @@
-from sqlalchemy.orm import Session, relationship # relationship ni import qildik
+from sqlalchemy.orm import Session
 from sqlalchemy import func, extract
-import database, schemas, security # 'database' ni 'app.database' deb o'zgartirish mumkin, agar app papkasi PYTHONPATH da bo'lsa
+import database, schemas, security
 import datetime
 from typing import List, Optional
+from sqlalchemy import select
 
 # --- User CRUD (o'zgarmagan, faqat database.User ni to'g'ri ishlatish) ---
 def get_user(db: Session, user_id: int) -> Optional[database.User]:
@@ -283,3 +284,107 @@ def get_ingredient_consumption_for_period(db: Session, product_id: int, start_da
         total_consumed += (ingredient_recipe.required_grams * serving_log.portions_served)
         
     return total_consumed
+def create_audit_log(db: Session, log_entry: schemas.AuditLogCreate) -> database.AuditLog:
+    try:
+        db_log = database.AuditLog(
+            username=log_entry.username,
+            method=log_entry.method,
+            endpoint_path=log_entry.endpoint_path,
+            client_host=log_entry.client_host,
+            user_agent=log_entry.user_agent,
+            details=log_entry.details,
+            timestamp=datetime.datetime.utcnow() 
+        )
+        db.add(db_log)
+        db.commit()
+        db.refresh(db_log)
+        return db_log
+    except Exception as e:
+        print(f"CRUD_AUDIT_LOG: Error creating ultra-simplified audit log: {e}")
+        db.rollback()
+        raise
+
+def get_audit_logs(
+    db: Session, 
+    skip: int = 0, 
+    limit: int = 100,
+    user_id: Optional[int] = None,
+    username_contains: Optional[str] = None,
+    method: Optional[str] = None,
+    endpoint_path_contains: Optional[str] = None,
+    status_code: Optional[int] = None,
+    start_date: Optional[datetime.datetime] = None,
+    end_date: Optional[datetime.datetime] = None
+) -> List[database.AuditLog]:
+    query = db.query(database.AuditLog)
+
+    if user_id is not None:
+        query = query.filter(database.AuditLog.user_id == user_id)
+    if username_contains:
+        query = query.filter(database.AuditLog.username.ilike(f"%{username_contains}%"))
+    if method:
+        query = query.filter(database.AuditLog.method == method.upper())
+    if endpoint_path_contains:
+        query = query.filter(database.AuditLog.endpoint_path.ilike(f"%{endpoint_path_contains}%"))
+    if status_code is not None:
+        query = query.filter(database.AuditLog.status_code == status_code)
+    if start_date:
+        query = query.filter(database.AuditLog.timestamp >= start_date)
+    if end_date:
+        # Agar end_date faqat sana bo'lsa, kun oxirigacha olish uchun
+        if end_date.hour == 0 and end_date.minute == 0 and end_date.second == 0:
+            end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        query = query.filter(database.AuditLog.timestamp <= end_date)
+    
+    return query.order_by(database.AuditLog.timestamp.desc()).offset(skip).limit(limit).all()
+
+def get_user_preview_for_log(db: Session, user_id: int) -> Optional[str]:
+    # stmt = select(database.User.username).where(database.User.id == user_id) # Eski usul (1.x)
+    stmt = select(database.User.username).filter_by(id=user_id) # Yangi usul (2.0)
+    username = db.execute(stmt).scalar_one_or_none()
+    return f"Foydalanuvchi '{username}' (ID: {user_id})" if username else f"Foydalanuvchi (ID: {user_id})"
+
+def get_product_preview_for_log(db: Session, product_id: int) -> Optional[str]:
+    # stmt = select(database.Product.name).where(database.Product.id == product_id) # Eski usul
+    stmt = select(database.Product.name).filter_by(id=product_id) # Yangi usul
+    product_name = db.execute(stmt).scalar_one_or_none()
+    return f"Mahsulot '{product_name}' (ID: {product_id})" if product_name else f"Mahsulot (ID: {product_id})"
+
+def get_meal_preview_for_log(db: Session, meal_id: int) -> Optional[str]:
+    # stmt = select(database.Meal.name).where(database.Meal.id == meal_id) # Eski usul
+    stmt = select(database.Meal.name).filter_by(id=meal_id) # Yangi usul
+    meal_name = db.execute(stmt).scalar_one_or_none()
+    return f"Taom '{meal_name}' (ID: {meal_id})" if meal_name else f"Taom (ID: {meal_id})"
+def get_user_name_for_log(db: Session, user_id: int) -> Optional[str]:
+    """Berilgan user_id bo'yicha foydalanuvchi nomini qaytaradi."""
+    stmt = select(database.User.username).filter_by(id=user_id)
+    return db.execute(stmt).scalar_one_or_none()
+
+def get_product_name_for_log(db: Session, product_id: int) -> Optional[str]:
+    """Berilgan product_id bo'yicha mahsulot nomini qaytaradi."""
+    stmt = select(database.Product.name).filter_by(id=product_id)
+    return db.execute(stmt).scalar_one_or_none()
+
+def get_meal_name_for_log(db: Session, meal_id: int) -> Optional[str]:
+    """Berilgan meal_id bo'yicha taom nomini qaytaradi."""
+    stmt = select(database.Meal.name).filter_by(id=meal_id)
+    return db.execute(stmt).scalar_one_or_none()
+
+def delete_old_audit_logs(db: Session, days_to_keep: int = 30) -> int:
+    """
+    Belgilangan 'days_to_keep' dan eski bo'lgan audit loglarini o'chiradi.
+    O'chirilgan yozuvlar sonini qaytaradi.
+    """
+    if days_to_keep <= 0:
+        return 0
+    
+
+    cutoff_date = datetime.datetime.utcnow() - datetime.timedelta(days=days_to_keep)
+    
+    try:
+        num_deleted_rows = db.query(database.AuditLog).filter(database.AuditLog.timestamp < cutoff_date).delete(synchronize_session=False)
+        db.commit()
+        return num_deleted_rows
+    except Exception as e:
+        db.rollback()
+        return 0

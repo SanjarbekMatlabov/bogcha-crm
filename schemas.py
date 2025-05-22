@@ -162,3 +162,21 @@ class DailyConsumptionDataPoint(BaseModel): # Yoki shunchaki DailyConsumption
 
     class Config:
         orm_mode = True
+class AuditLogBase(BaseModel):
+    username: Optional[str] = None
+    # status_code: int
+    method: str
+    endpoint_path: str
+    client_host: Optional[str] = None
+    user_agent: Optional[str] = None
+    details: str
+
+class AuditLogCreate(AuditLogBase):
+    pass
+
+class AuditLogSchema(AuditLogBase):
+    id: int
+    timestamp: datetime.datetime
+
+    class Config:
+        orm_mode = True

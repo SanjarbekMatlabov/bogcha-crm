@@ -1,22 +1,289 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Body, Query, APIRouter
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from typing import List, Annotated, Optional
+from typing import List, Annotated, Optional,Tuple 
 import datetime
-
-# Modullarni to'g'ri import qilish (papkangiz strukturasiga qarab o'zgartiring)
-# Agar app papkasi PYTHONPATH da bo'lsa:
-# from app import crud, schemas, security, utils, database
-# from app.database import engine, get_db, create_db_and_tables, UserRole
-# Agar barcha fayllar bitta app papkasida bo'lsa:
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+import json
+import datetime
 import crud, schemas, security, utils, database
 from database import engine, get_db, create_db_and_tables, UserRole
-
-
 from fastapi.middleware.cors import CORSMiddleware
-
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+import html
+scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
+def run_scheduled_log_deletion():
+    print(f"SCHEDULER: Eski audit loglarini o'chirish vazifasi ishga tushdi - {datetime.datetime.now(scheduler.timezone)}")
+    db: Optional[Session] = None
+    try:
+        db = next(database.get_db()) 
+        deleted_count = crud.delete_old_audit_logs(db, days_to_keep=30) 
+    except Exception as e:
+        print(f"SCHEDULER: Eski loglarni o'chirishda xatolik yuz berdi: {e}")
+    finally:
+        if db:
+            db.close()
 app = FastAPI(title="Bog'cha Ovqatlar va Ombor Hisoboti Dasturi Rev.2")
+def mask_sensitive_data(data: dict) -> dict:
+    if not isinstance(data, dict):
+        return data
+    
+    sensitive_keys = ["password", "token", "access_token", "refresh_token", "secret", "credentials", "new_password", "current_password"]
+    
+    cleaned_data = {}
+    for key, value in data.items():
+        if key.lower() in sensitive_keys:
+            cleaned_data[key] = "***MASKED***"
+        elif isinstance(value, dict):
+            cleaned_data[key] = mask_sensitive_data(value)
+        elif isinstance(value, list):
+            cleaned_data[key] = [mask_sensitive_data(item) if isinstance(item, dict) else item for item in value]
+        else:
+            cleaned_data[key] = value
+    return cleaned_data
+# def get_resource_info_from_path(path: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+#     parts = path.strip("/").split("/")
+#     if not parts: return None, None, None
+#     main_entity_key = parts[0].lower()
+#     res_type_map = {"users": "Foydalanuvchi", "products": "Mahsulot", "meals": "Taom", "serve": "Taom Berish", "auth": "Autentifikatsiya"}
+#     res_type = res_type_map.get(main_entity_key)
+#     res_id = None
+#     sub_action = None
+#     if len(parts) > 1:
+#         if parts[1].isdigit():
+#             res_id = parts[1]
+#             if len(parts) > 2: sub_action = parts[2]
+#         else: # Masalan /products/type
+#             sub_action = parts[1]
+#             if main_entity_key == "products" and sub_action == "type": res_type = "Mahsulot turi"
 
+#     return res_type, res_id, sub_action
+def get_resource_type_from_path(path: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Endpoint yo'lidan resurs turi, IDsi va potentsial sub-resursini ajratib oladi.
+    Qaytaradi: (asosiy_resurs_nomi, resurs_id, sub_resurs_yoki_amal)
+    Masalan:
+    "/users/123" -> ("Foydalanuvchi", "123", None)
+    "/products/type" -> ("Mahsulot turi", None, "type")
+    "/products/45/receive_stock" -> ("Mahsulot", "45", "receive_stock")
+    """
+    parts = path.strip("/").split("/")
+    if not parts:
+        return None, None, None
+
+    main_entity_key = parts[0].lower()
+    resource_type_display: Optional[str] = None
+    resource_id_from_path: Optional[str] = None
+    sub_action_or_type: Optional[str] = None
+
+    type_map = {
+        "users": "Foydalanuvchi",
+        "products": "Mahsulot",
+        "meals": "Taom",
+        "serve": "Taom berish amali", # Bu alohida loglanishi mumkin
+        "auth": "Autentifikatsiya",
+        "audit-logs": "Audit Log"
+        # Boshqa router prefikslarini qo'shing
+    }
+    resource_type_display = type_map.get(main_entity_key)
+
+    if len(parts) > 1:
+        if parts[1].isdigit():
+            resource_id_from_path = parts[1]
+            if len(parts) > 2:
+                sub_action_or_type = parts[2]
+        else: # Masalan /products/type
+            sub_action_or_type = parts[1]
+    
+    if main_entity_key == "products" and sub_action_or_type == "type":
+        resource_type_display = "Mahsulot turi"
+        # Bu holda resource_id_from_path None bo'ladi (POST uchun)
+
+    return resource_type_display, resource_id_from_path, sub_action_or_type
+
+def get_resource_info_from_path(path: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    parts = path.strip("/").split("/")
+    if not parts or not parts[0]: 
+        return None, None, None
+    main_entity_key = parts[0].lower()
+    res_type_map = {
+        "users": "Foydalanuvchi", "products": "Mahsulot", "meals": "Taom", 
+        "serve": "Taom Berish", "auth": "Autentifikatsiya"
+        # Boshqa router prefikslarini qo'shing
+    }
+    res_type_display = res_type_map.get(main_entity_key)
+    res_id_from_path: Optional[str] = None
+    sub_action_or_type: Optional[str] = None
+
+    if len(parts) > 1:
+        if parts[1].isdigit():
+            res_id_from_path = parts[1]
+            if len(parts) > 2:
+                sub_action_or_type = parts[2] 
+        else:
+            sub_action_or_type = parts[1]
+    
+    if main_entity_key == "products" and sub_action_or_type == "type":
+        res_type_display = "Mahsulot turi"
+    elif main_entity_key == "serve" and res_id_from_path: # /serve/{meal_id}
+        res_type_display = "Taom" # Chunki taomga xizmat ko'rsatiladi
+
+    return res_type_display, res_id_from_path, sub_action_or_type
+
+
+class AuditLogMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        current_method = request.method.upper()
+        current_path = str(request.url.path)
+
+        if current_method in ["GET", "OPTIONS"]:
+            return await call_next(request)
+
+        req_body_bytes = await request.body()
+        
+        username_for_log: Optional[str] = "anonymous"
+        # Foydalanuvchi nomini olish logikasi (avvalgidek, user_id siz)
+        if hasattr(request.state, "user") and request.state.user:
+            username_for_log = getattr(request.state.user, "username", "state_user_no_username")
+        else:
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                token = auth_header.split(" ", 1)[1]
+                extracted_username = security.decode_username_from_token(token) 
+                if extracted_username and extracted_username not in ["expired_token", "invalid_token"]:
+                    username_for_log = extracted_username
+                elif extracted_username:
+                     username_for_log = extracted_username
+        
+        # --- Resurs haqida ma'lumot olish ---
+        fetched_resource_name: Optional[str] = None # Faqat nomni saqlaymiz
+        path_resource_type, path_resource_id, path_sub_action = get_resource_info_from_path(current_path)
+
+        if path_resource_id and path_resource_type:
+            db_for_prefetch: Optional[Session] = None
+            try:
+                db_for_prefetch = next(database.get_db())
+                if path_resource_type == "Foydalanuvchi":
+                    fetched_resource_name = crud.get_user_name_for_log(db_for_prefetch, int(path_resource_id))
+                elif path_resource_type == "Mahsulot":
+                    fetched_resource_name = crud.get_product_name_for_log(db_for_prefetch, int(path_resource_id))
+                elif path_resource_type == "Taom": # Bu /meals/{id} va /serve/{id} uchun ishlaydi
+                    fetched_resource_name = crud.get_meal_name_for_log(db_for_prefetch, int(path_resource_id))
+                
+                if fetched_resource_name:
+                     print(f"AUDIT_MIDDLEWARE: Operatsiyadan oldin resurs nomi olindi: '{fetched_resource_name}'")
+                else:
+                     print(f"AUDIT_MIDDLEWARE: Resurs (ID: {path_resource_id}, Turi: {path_resource_type}) uchun nom topilmadi.")
+
+            except ValueError:
+                 print(f"AUDIT_MIDDLEWARE: Prefetch uchun yaroqsiz resurs IDsi: {path_resource_id}")
+            except Exception as e_prefetch:
+                print(f"AUDIT_MIDDLEWARE: Log uchun resurs nomini oldindan olishda xatolik: {e_prefetch}")
+            finally:
+                if db_for_prefetch: db_for_prefetch.close()
+        
+        # POST uchun yangi obyekt nomini body dan olish
+        created_item_name_from_body: Optional[str] = None
+        if current_method == "POST" and req_body_bytes:
+            try:
+                if "application/json" in request.headers.get("content-type", "").lower():
+                    body_json = json.loads(req_body_bytes.decode('utf-8'))
+                    created_item_name_from_body = body_json.get("name") or body_json.get("username")
+            except Exception: pass
+
+        cloned_request_scope = dict(request.scope)
+        async def receive(): return {"type": "http.request", "body": req_body_bytes, "more_body": False}
+        request_for_endpoint = Request(cloned_request_scope, receive=receive, send=request._send)
+
+        response: Optional[Response] = None
+        status_code_for_log: int = 500 
+        exception_details_str: Optional[str] = None
+        final_log_details: str = ""
+        should_write_log = True
+
+        try:
+            response = await call_next(request_for_endpoint)
+            status_code_for_log = response.status_code
+            if current_path == "/auth/token" and current_method == "POST" and (200 <= status_code_for_log < 300):
+                should_write_log = False
+        except Exception as e:
+            exception_details_str = f"{type(e).__name__}: {str(e)}"
+            if hasattr(e, "status_code"): status_code_for_log = e.status_code
+        
+        if should_write_log:
+            user_display = f"Foydalanuvchi '{html.escape(username_for_log)}'" if username_for_log and username_for_log != "anonymous" else "Noma'lum foydalanuvchi"
+            
+            action_verb = ""
+            target_object_display = "" # Bu yerda resurs nomi bo'ladi
+            operation_successful = (200 <= status_code_for_log < 300) and not exception_details_str
+
+            method_verb_map_success = {"POST": "qo'shdi", "PUT": "tahrirladi", "PATCH": "qisman tahrirladi", "DELETE": "o'chirdi"}
+            method_verb_map_attempt = {"POST": "qo'shishga urindi", "PUT": "tahrirlashga urindi", "PATCH": "qisman tahrirlashga urindi", "DELETE": "o'chirishga urindi"}
+            
+            action_verb = method_verb_map_success.get(current_method) if operation_successful else method_verb_map_attempt.get(current_method)
+            if not action_verb: action_verb = f"{current_method} amalini " + ("bajardi" if operation_successful else "bajarishga urindi")
+
+            # Target obyektni aniqlash
+            if current_method == "POST":
+                object_name_to_log = created_item_name_from_body or "noma'lum obyekt"
+                res_type_to_log = path_resource_type or "noma'lum turdagi"
+                
+                # Maxsus holatlar uchun
+                if path_resource_type == "Mahsulot" and path_sub_action == "receive_stock": # /products/{id}/receive_stock
+                    target_object_display = f"'{html.escape(fetched_resource_name or f'ID: {path_resource_id}')}' mahsulotiga yangi kirim"
+                elif path_resource_type == "Taom" and current_path.startswith("/serve/"): # /serve/{meal_id}
+                    target_object_display = f"'{html.escape(fetched_resource_name or f'ID: {path_resource_id}')}' taomini berish"
+                     # Agar porsiya soni kerak bo'lsa, request_body dan olish kerak
+                    if req_body_bytes:
+                        try:
+                            body_json = json.loads(req_body_bytes.decode('utf-8'))
+                            portions = body_json.get("portions_to_serve")
+                            if portions: target_object_display += f" ({portions} porsiya)"
+                        except: pass
+                elif path_resource_type: # Umumiy POST holatlari
+                    target_object_display = f"yangi '{html.escape(object_name_to_log)}' nomli {res_type_to_log.lower()}ni"
+                else:
+                    target_object_display = f"{html.escape(current_path)} manziliga ma'lumot"
+            
+            elif current_method in ["PUT", "PATCH", "DELETE"]:
+                target_object_display = f"'{html.escape(fetched_resource_name)}'" if fetched_resource_name else \
+                                      f"{(path_resource_type.lower() if path_resource_type else 'obyekt')} (ID: {path_resource_id or 'N/A'})"
+                if path_resource_type == "Mahsulot" and path_sub_action == "update_info":
+                     target_object_display += " nomini" # Masalan: "Sabzi mahsulotining nomini tahrirladi"
+            else: 
+                target_object_display = f"{html.escape(current_path)} manzilidagi resursni"
+
+            final_log_details = f"{user_display} {target_object_display} {action_verb}."
+
+            if not operation_successful:
+                final_log_details += f" Natija: Xatolik."
+                if exception_details_str:
+                     final_log_details += f" Tafsilot: {html.escape(exception_details_str[:100])}"
+            
+            db_session_for_log_save: Optional[Session] = None
+            try:
+                db_session_for_log_save = next(database.get_db())
+                log_entry_data = schemas.AuditLogCreate(
+                    username=username_for_log,
+                    method=request.method,
+                    endpoint_path=current_path,
+                    client_host=request.client.host if request.client else None,
+                    user_agent=request.headers.get("user-agent"),
+                    details=final_log_details.strip()
+                    # status_code va request_body endi AuditLogCreate da yo'q
+                )
+                crud.create_audit_log(db=db_session_for_log_save, log_entry=log_entry_data)
+            except Exception as log_exc:
+                print(f"CRITICAL: Audit logni yozishda xatolik: {log_exc}"); import traceback; traceback.print_exc()
+            finally:
+                if db_session_for_log_save: db_session_for_log_save.close()
+        
+        if response is None: 
+             return JSONResponse(status_code=status_code_for_log, content={"detail": exception_details_str or "Middleware error"})
+        return response
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], # Ishlab chiqish uchun. Productionda aniq domenlarni ko'rsating.
@@ -24,28 +291,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(AuditLogMiddleware)
+
 
 # --- Startup event ---
 @app.on_event("startup")
-def on_startup_event(): # Nomini o'zgartirdim, on_startup FastAPI ning o'zida bo'lishi mumkin
-    print("MAIN.PY: Startup event boshlandi...")
+def on_startup_event(): 
     create_db_and_tables()
     db = next(get_db())
     try:
         # Admin
         if not crud.get_user_by_username(db, username="admin"):
             crud.create_user(db, schemas.UserCreate(username="admin", password="adminpassword", role=UserRole.admin))
-            print("Admin user created.")
         # Chef
         if not crud.get_user_by_username(db, username="chef"):
             crud.create_user(db, schemas.UserCreate(username="chef", password="chefpassword", role=UserRole.chef))
-            print("Chef user created.")
         # Manager
         if not crud.get_user_by_username(db, username="manager"):
             crud.create_user(db, schemas.UserCreate(username="manager", password="managerpassword", role=UserRole.manager))
-            print("Manager user created.")
     finally:
         db.close()
+    try:
+        scheduler.add_job(
+            run_scheduled_log_deletion, 
+            CronTrigger(hour=2, minute=30, timezone="Asia/Tashkent"),
+            id="delete_old_logs_job", 
+            replace_existing=True 
+        )
+        if not scheduler.running:
+            scheduler.start()
+    except Exception as e_scheduler:
+        print(f"MAIN.PY (Startup): Scheduler'ni sozlashda xatolik: {e_scheduler}")
     print("MAIN.PY: Startup event tugadi.")
 
 class CommonQueryParams:
@@ -88,12 +364,12 @@ async def login_for_access_token_route( # Nomini o'zgartirdim
 
 # --- User Management Endpoints ---
 @users_router.post("/", response_model=schemas.UserSchema, status_code=status.HTTP_201_CREATED)
-def create_user_route( # Nomini o'zgartirdim
+def create_user_route( 
     user: schemas.UserCreate, 
     db: Session = Depends(get_db),
     current_user: database.User = Depends(security.get_current_admin_user)
 ):
-    return crud.create_user(db=db, user=user) # crud.create_user xatolikni o'zi handle qiladi (agar username mavjud bo'lsa)
+    return crud.create_user(db=db, user=user) 
 
 @users_router.get("/", response_model=List[schemas.UserSchema])
 def read_users_route(
@@ -280,7 +556,7 @@ def read_meal_route(
 @meals_router.put("/{meal_id}", response_model=schemas.Meal)
 def update_meal_route(
     meal_id: int,
-    meal_update: schemas.MealUpdate, # schemas.py da MealUpdate name va ingredients ni Optional qilib oladi
+    meal_update: schemas.MealUpdate, 
     db: Session = Depends(get_db),
     current_user: database.User = Depends(security.get_current_manager_user)
 ):
@@ -374,7 +650,35 @@ def ingredient_consumption_report_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Product with ID {product_id} not found.")
 
     return utils.get_ingredient_consumption_data(db, product_id, start_date, end_date)
+audit_logs_router = APIRouter(prefix="/audit-logs", tags=["Audit Logs Management"])
 
+@audit_logs_router.get("/", response_model=List[schemas.AuditLogSchema], dependencies=[Depends(security.get_current_admin_user)])
+async def read_audit_logs(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500), # Limitni chegaralash
+    user_id: Optional[int] = Query(None),
+    username: Optional[str] = Query(None, min_length=1, max_length=100),
+    method: Optional[str] = Query(None, min_length=1, max_length=10),
+    endpoint_path_contains: Optional[str] = Query(None, min_length=1),
+    status_code: Optional[int] = Query(None),
+    start_date: Optional[datetime.datetime] = Query(None),
+    end_date: Optional[datetime.datetime] = Query(None),
+    db: Session = Depends(get_db)
+):
+    # crud.py da get_audit_logs funksiyasini yaratish kerak bo'ladi
+    logs = crud.get_audit_logs(
+        db, 
+        skip=skip, 
+        limit=limit,
+        user_id=user_id,
+        username_contains=username, # username bo'yicha qisman qidiruv
+        method=method,
+        endpoint_path_contains=endpoint_path_contains,
+        status_code=status_code,
+        start_date=start_date,
+        end_date=end_date
+    )
+    return logs
 
 @reports_router.get("/product_delivery_history/{product_id}", response_model=List[schemas.ProductDelivery]) # product_id ni path ga o'tkazdim
 def product_delivery_history_route(
@@ -475,6 +779,7 @@ def potential_abuse_alert_route(
         # Lekin None qaytarish Optional response modeliga eng mos keladi.
 
     return alert_data
+
 # --- Routers ni asosiy app ga qo'shish ---
 app.include_router(auth_router)
 app.include_router(users_router)
@@ -484,6 +789,7 @@ app.include_router(serving_router)
 app.include_router(portions_router)
 app.include_router(reports_router)
 app.include_router(alerts_router)
+app.include_router(audit_logs_router)
 
 if __name__ == "__main__":
     import uvicorn

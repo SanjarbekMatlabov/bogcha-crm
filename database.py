@@ -1,13 +1,13 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Enum as SQLAlchemyEnum, Boolean
+from sqlalchemy import Text, create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Enum as SQLAlchemyEnum, Boolean
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.ext.declarative import declarative_base
 import datetime
 import enum
 
-DATABASE_URL = "sqlite:///./bogcha_app.db" # .db fayli loyiha papkasida paydo bo'ladi
+DATABASE_URL = "sqlite:///./bogcha_app.db" 
 
 engine = create_engine(
-    DATABASE_URL, connect_args={"check_same_thread": False} # SQLite uchun kerak
+    DATABASE_URL, connect_args={"check_same_thread": False} 
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -37,15 +37,12 @@ class Product(Base):
     name = Column(String, unique=True, index=True, nullable=False)
     # Bu mahsulotning ombordagi joriy umumiy miqdori
     quantity_grams = Column(Float, nullable=False, default=0.0)
-    # Oxirgi yetkazib berilgan sana (yoki birinchi kiritilgan sana)
-    # Asosiy yetkazib berish tarixi ProductDelivery da bo'ladi
     delivery_date = Column(DateTime, default=datetime.datetime.utcnow)
 
     meal_ingredients = relationship("MealIngredient", back_populates="product")
     deliveries = relationship("ProductDelivery", back_populates="product", cascade="all, delete-orphan")
 
 
-# YANGI MODEL: Mahsulot yetkazib berish (qabul qilish) uchun
 class ProductDelivery(Base):
     __tablename__ = "product_deliveries"
 
@@ -57,7 +54,18 @@ class ProductDelivery(Base):
     # Masalan, hisob-faktura raqami yoki boshqa ma'lumotlar uchun maydon qo'shish mumkin
 
     product = relationship("Product", back_populates="deliveries")
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
 
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    username = Column(String, nullable=True, index=True)
+    # status_code = Column(Integer, index=True)
+    method = Column(String, index=True) 
+    endpoint_path = Column(String, index=True)
+    client_host = Column(String, nullable=True) 
+    user_agent = Column(String, nullable=True)
+    details = Column(Text, nullable=False)
 
 class Meal(Base):
     __tablename__ = "meals"
