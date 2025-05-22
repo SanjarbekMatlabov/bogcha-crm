@@ -41,6 +41,7 @@ class ProductDeliveryCreate(ProductDeliveryBase):
 
 class ProductDelivery(ProductDeliveryBase):
     id: int
+    product: Product
     class Config:
         orm_mode = True
 

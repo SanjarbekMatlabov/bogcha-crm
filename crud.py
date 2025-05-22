@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session,selectinload
 from sqlalchemy import func, extract
 import database, schemas, security
 import datetime
@@ -142,11 +142,29 @@ def create_product_delivery(db: Session, delivery_in: schemas.ProductDeliveryCre
     db.refresh(product_obj) # Product obyektini ham yangilash
     return db_delivery
 
-def get_product_deliveries(db: Session, product_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[database.ProductDelivery]:
-    query = db.query(database.ProductDelivery).order_by(database.ProductDelivery.delivery_date.desc())
-    if product_id:
+def get_product_deliveries(
+    db: Session, 
+    product_id: Optional[int] = None, 
+    start_date: Optional[datetime.datetime] = None,
+    end_date: Optional[datetime.datetime] = None,
+    skip: int = 0, 
+    limit: int = 100
+) -> List[database.ProductDelivery]: # Bu database.ProductDelivery qaytaradi
+    
+    query = db.query(database.ProductDelivery).options(
+        selectinload(database.ProductDelivery.product) # Bu Product obyektini yuklaydi
+    )
+
+    if product_id is not None:
         query = query.filter(database.ProductDelivery.product_id == product_id)
-    return query.offset(skip).limit(limit).all()
+    if start_date:
+        query = query.filter(database.ProductDelivery.delivery_date >= start_date)
+    if end_date:
+        if end_date.hour == 0 and end_date.minute == 0 and end_date.second == 0:
+            end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        query = query.filter(database.ProductDelivery.delivery_date <= end_date)
+    
+    return query.order_by(database.ProductDelivery.delivery_date.desc()).offset(skip).limit(limit).all()
 
 
 # --- Meal CRUD (update_meal o'zgartirilgan) ---

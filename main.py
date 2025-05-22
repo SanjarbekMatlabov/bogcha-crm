@@ -779,7 +779,19 @@ def potential_abuse_alert_route(
         # Lekin None qaytarish Optional response modeliga eng mos keladi.
 
     return alert_data
-
+@reports_router.get("/deliveries/all", response_model=List[schemas.ProductDelivery]) # Yoki boshqa router
+async def read_all_product_deliveries( # Async qildim, agar crud funksiyangiz async bo'lmasa, bu ham sync bo'lishi mumkin
+    commons: Annotated[CommonQueryParams, Depends()], # Pagination uchun
+    db: Session = Depends(get_db),
+    current_user: database.User = Depends(security.get_current_manager_user) # Ruxsatni tekshirish
+):
+    deliveries = crud.get_product_deliveries(
+        db, 
+        product_id=None, # Barcha mahsulotlar uchun
+        skip=commons.skip, 
+        limit=commons.limit
+    )
+    return deliveries
 # --- Routers ni asosiy app ga qo'shish ---
 app.include_router(auth_router)
 app.include_router(users_router)
