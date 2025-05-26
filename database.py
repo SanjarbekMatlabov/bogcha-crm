@@ -35,7 +35,6 @@ class Product(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True, nullable=False)
-    # Bu mahsulotning ombordagi joriy umumiy miqdori
     quantity_grams = Column(Float, nullable=False, default=0.0)
     delivery_date = Column(DateTime, default=datetime.datetime.utcnow)
 

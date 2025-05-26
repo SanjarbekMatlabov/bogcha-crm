@@ -133,13 +133,12 @@ def create_product_delivery(db: Session, delivery_in: schemas.ProductDeliveryCre
     )
     db.add(db_delivery)
 
-    # Asosiy Product jadvalidagi miqdorni va oxirgi yetkazib berish sanasini yangilash
     product_obj.quantity_grams += delivery_in.quantity_received
-    product_obj.delivery_date = delivery_in.delivery_date # Oxirgi kelgan sana
+    product_obj.delivery_date = delivery_in.delivery_date 
 
     db.commit()
     db.refresh(db_delivery)
-    db.refresh(product_obj) # Product obyektini ham yangilash
+    db.refresh(product_obj) 
     return db_delivery
 
 def get_product_deliveries(
@@ -149,10 +148,10 @@ def get_product_deliveries(
     end_date: Optional[datetime.datetime] = None,
     skip: int = 0, 
     limit: int = 100
-) -> List[database.ProductDelivery]: # Bu database.ProductDelivery qaytaradi
+) -> List[database.ProductDelivery]: 
     
     query = db.query(database.ProductDelivery).options(
-        selectinload(database.ProductDelivery.product) # Bu Product obyektini yuklaydi
+        selectinload(database.ProductDelivery.product) 
     )
 
     if product_id is not None:

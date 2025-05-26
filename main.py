@@ -83,10 +83,10 @@ def get_resource_type_from_path(path: str) -> Tuple[Optional[str], Optional[str]
         "users": "Foydalanuvchi",
         "products": "Mahsulot",
         "meals": "Taom",
-        "serve": "Taom berish amali", # Bu alohida loglanishi mumkin
+        "serve": "Taom berish amali", 
         "auth": "Autentifikatsiya",
         "audit-logs": "Audit Log"
-        # Boshqa router prefikslarini qo'shing
+       
     }
     resource_type_display = type_map.get(main_entity_key)
 
@@ -95,12 +95,11 @@ def get_resource_type_from_path(path: str) -> Tuple[Optional[str], Optional[str]
             resource_id_from_path = parts[1]
             if len(parts) > 2:
                 sub_action_or_type = parts[2]
-        else: # Masalan /products/type
+        else:
             sub_action_or_type = parts[1]
     
     if main_entity_key == "products" and sub_action_or_type == "type":
         resource_type_display = "Mahsulot turi"
-        # Bu holda resource_id_from_path None bo'ladi (POST uchun)
 
     return resource_type_display, resource_id_from_path, sub_action_or_type
 
@@ -112,7 +111,6 @@ def get_resource_info_from_path(path: str) -> Tuple[Optional[str], Optional[str]
     res_type_map = {
         "users": "Foydalanuvchi", "products": "Mahsulot", "meals": "Taom", 
         "serve": "Taom Berish", "auth": "Autentifikatsiya"
-        # Boshqa router prefikslarini qo'shing
     }
     res_type_display = res_type_map.get(main_entity_key)
     res_id_from_path: Optional[str] = None
@@ -128,8 +126,8 @@ def get_resource_info_from_path(path: str) -> Tuple[Optional[str], Optional[str]
     
     if main_entity_key == "products" and sub_action_or_type == "type":
         res_type_display = "Mahsulot turi"
-    elif main_entity_key == "serve" and res_id_from_path: # /serve/{meal_id}
-        res_type_display = "Taom" # Chunki taomga xizmat ko'rsatiladi
+    elif main_entity_key == "serve" and res_id_from_path: 
+        res_type_display = "Taom" 
 
     return res_type_display, res_id_from_path, sub_action_or_type
 
@@ -145,7 +143,6 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
         req_body_bytes = await request.body()
         
         username_for_log: Optional[str] = "anonymous"
-        # Foydalanuvchi nomini olish logikasi (avvalgidek, user_id siz)
         if hasattr(request.state, "user") and request.state.user:
             username_for_log = getattr(request.state.user, "username", "state_user_no_username")
         else:
@@ -159,7 +156,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
                      username_for_log = extracted_username
         
         # --- Resurs haqida ma'lumot olish ---
-        fetched_resource_name: Optional[str] = None # Faqat nomni saqlaymiz
+        fetched_resource_name: Optional[str] = None 
         path_resource_type, path_resource_id, path_sub_action = get_resource_info_from_path(current_path)
 
         if path_resource_id and path_resource_type:
@@ -170,7 +167,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
                     fetched_resource_name = crud.get_user_name_for_log(db_for_prefetch, int(path_resource_id))
                 elif path_resource_type == "Mahsulot":
                     fetched_resource_name = crud.get_product_name_for_log(db_for_prefetch, int(path_resource_id))
-                elif path_resource_type == "Taom": # Bu /meals/{id} va /serve/{id} uchun ishlaydi
+                elif path_resource_type == "Taom": 
                     fetched_resource_name = crud.get_meal_name_for_log(db_for_prefetch, int(path_resource_id))
                 
                 if fetched_resource_name:
@@ -185,7 +182,6 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             finally:
                 if db_for_prefetch: db_for_prefetch.close()
         
-        # POST uchun yangi obyekt nomini body dan olish
         created_item_name_from_body: Optional[str] = None
         if current_method == "POST" and req_body_bytes:
             try:
@@ -217,7 +213,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             user_display = f"Foydalanuvchi '{html.escape(username_for_log)}'" if username_for_log and username_for_log != "anonymous" else "Noma'lum foydalanuvchi"
             
             action_verb = ""
-            target_object_display = "" # Bu yerda resurs nomi bo'ladi
+            target_object_display = "" 
             operation_successful = (200 <= status_code_for_log < 300) and not exception_details_str
 
             method_verb_map_success = {"POST": "qo'shdi", "PUT": "tahrirladi", "PATCH": "qisman tahrirladi", "DELETE": "o'chirdi"}
@@ -226,24 +222,21 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             action_verb = method_verb_map_success.get(current_method) if operation_successful else method_verb_map_attempt.get(current_method)
             if not action_verb: action_verb = f"{current_method} amalini " + ("bajardi" if operation_successful else "bajarishga urindi")
 
-            # Target obyektni aniqlash
             if current_method == "POST":
                 object_name_to_log = created_item_name_from_body or "noma'lum obyekt"
                 res_type_to_log = path_resource_type or "noma'lum turdagi"
                 
-                # Maxsus holatlar uchun
-                if path_resource_type == "Mahsulot" and path_sub_action == "receive_stock": # /products/{id}/receive_stock
+                if path_resource_type == "Mahsulot" and path_sub_action == "receive_stock":
                     target_object_display = f"'{html.escape(fetched_resource_name or f'ID: {path_resource_id}')}' mahsulotiga yangi kirim"
-                elif path_resource_type == "Taom" and current_path.startswith("/serve/"): # /serve/{meal_id}
+                elif path_resource_type == "Taom" and current_path.startswith("/serve/"): 
                     target_object_display = f"'{html.escape(fetched_resource_name or f'ID: {path_resource_id}')}' taomini berish"
-                     # Agar porsiya soni kerak bo'lsa, request_body dan olish kerak
                     if req_body_bytes:
                         try:
                             body_json = json.loads(req_body_bytes.decode('utf-8'))
                             portions = body_json.get("portions_to_serve")
                             if portions: target_object_display += f" ({portions} porsiya)"
                         except: pass
-                elif path_resource_type: # Umumiy POST holatlari
+                elif path_resource_type:
                     target_object_display = f"yangi '{html.escape(object_name_to_log)}' nomli {res_type_to_log.lower()}ni"
                 else:
                     target_object_display = f"{html.escape(current_path)} manziliga ma'lumot"
@@ -252,7 +245,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
                 target_object_display = f"'{html.escape(fetched_resource_name)}'" if fetched_resource_name else \
                                       f"{(path_resource_type.lower() if path_resource_type else 'obyekt')} (ID: {path_resource_id or 'N/A'})"
                 if path_resource_type == "Mahsulot" and path_sub_action == "update_info":
-                     target_object_display += " nomini" # Masalan: "Sabzi mahsulotining nomini tahrirladi"
+                     target_object_display += " nomini" 
             else: 
                 target_object_display = f"{html.escape(current_path)} manzilidagi resursni"
 
@@ -273,7 +266,6 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
                     client_host=request.client.host if request.client else None,
                     user_agent=request.headers.get("user-agent"),
                     details=final_log_details.strip()
-                    # status_code va request_body endi AuditLogCreate da yo'q
                 )
                 crud.create_audit_log(db=db_session_for_log_save, log_entry=log_entry_data)
             except Exception as log_exc:
@@ -286,7 +278,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
         return response
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Ishlab chiqish uchun. Productionda aniq domenlarni ko'rsating.
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -334,7 +326,7 @@ auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
 users_router = APIRouter(prefix="/users", tags=["User Management"])
 products_router = APIRouter(prefix="/products", tags=["Product Management"])
 meals_router = APIRouter(prefix="/meals", tags=["Meal Management"])
-serving_router = APIRouter(prefix="/serve", tags=["Meal Serving System"]) # Prefixni o'zgartirdim
+serving_router = APIRouter(prefix="/serve", tags=["Meal Serving System"]) 
 portions_router = APIRouter(prefix="/portions", tags=["Portion Calculation"])
 reports_router = APIRouter(prefix="/reports", tags=["Reports & Visualization"])
 alerts_router = APIRouter(prefix="/alerts", tags=["Alerts"])
@@ -342,7 +334,7 @@ alerts_router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
 # --- Authentication Endpoints ---
 @auth_router.post("/token", response_model=schemas.Token)
-async def login_for_access_token_route( # Nomini o'zgartirdim
+async def login_for_access_token_route( 
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: Session = Depends(get_db)
 ):
@@ -403,7 +395,6 @@ def update_user_route(
     db: Session = Depends(get_db),
     current_user: database.User = Depends(security.get_current_admin_user)
 ):
-    # crud.update_user ichida xatolik va topilmagan holatlar handle qilinadi
     updated_user = crud.update_user(db, user_id=user_id, user_update=user_update)
     if not updated_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found or update failed")
@@ -425,7 +416,7 @@ def delete_user_route(
 
 # --- Product Management Endpoints ---
 @products_router.post("/type", response_model=schemas.Product, status_code=status.HTTP_201_CREATED)
-def create_new_product_type_route( # Yangi mahsulot TURINI yaratish
+def create_new_product_type_route( 
     product_in: schemas.ProductCreate,
     db: Session = Depends(get_db),
     current_user: database.User = Depends(security.get_current_manager_user)
@@ -436,24 +427,15 @@ def create_new_product_type_route( # Yangi mahsulot TURINI yaratish
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 @products_router.post("/{product_id}/receive_stock", response_model=schemas.ProductDelivery, status_code=status.HTTP_201_CREATED)
-def receive_product_stock_route( # Mavjud mahsulotga miqdor qo'shish
+def receive_product_stock_route( 
     product_id: int,
-    delivery_in: schemas.ProductDeliveryCreate, # product_id bu yerda bo'lmasligi kerak, chunki URL da bor
+    delivery_in: schemas.ProductDeliveryCreate, 
     db: Session = Depends(get_db),
     current_user: database.User = Depends(security.get_current_manager_user)
 ):
-    # delivery_in.product_id ni URL dagi product_id bilan almashtirish yoki tekshirish
     if delivery_in.product_id != product_id:
-        # Agar validatsiya uchun ProductDeliveryCreate da product_id qoldirilsa, uni tekshirish kerak.
-        # Yoki ProductDeliveryCreate schemasidan product_id ni olib tashlab, uni faqat URL dan olish.
-        # Keling, ProductDeliveryCreate da product_id qolsin va uni tekshiraylik.
          raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Product ID in path and body do not match.")
-
     try:
-        # product_id URL dan olingani uchun delivery_in dan emas, to'g'ridan-to'g'ri beramiz
-        # crud.create_product_delivery ga product_id ni alohida berishimiz mumkin
-        # yoki delivery_in ni o'zgartirishimiz kerak.
-        # Yaxshisi, crud.create_product_delivery ichida delivery_in.product_id ni ishlatsin.
         return crud.create_product_delivery(db=db, delivery_in=delivery_in)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -478,10 +460,10 @@ def read_product_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     return db_product
 
-@products_router.put("/{product_id}/update_info", response_model=schemas.Product) # Faqat nomini o'zgartirish uchun
+@products_router.put("/{product_id}/update_info", response_model=schemas.Product) 
 def update_product_info_route(
     product_id: int,
-    product_update: schemas.ProductUpdate, # Bu schema faqat 'name' ni o'z ichiga olishi kerak
+    product_update: schemas.ProductUpdate, 
     db: Session = Depends(get_db),
     current_user: database.User = Depends(security.get_current_manager_user)
 ):
@@ -490,7 +472,7 @@ def update_product_info_route(
         if updated_product is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
         return updated_product
-    except ValueError as e: # Agar yangi nom band bo'lsa
+    except ValueError as e: 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
@@ -502,10 +484,10 @@ def delete_product_route(
 ):
     try:
         deleted_product = crud.delete_product(db, product_id=product_id)
-        if deleted_product is None: # Agar crud.delete_product xatoliksiz None qaytarsa (bu holat bo'lmasligi kerak)
+        if deleted_product is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found.")
         return deleted_product
-    except ValueError as e: # Mahsulot retseptda ishlatilayotgan bo'lsa
+    except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 @products_router.get("/{product_id}/deliveries", response_model=List[schemas.ProductDelivery])
@@ -580,10 +562,10 @@ def delete_meal_route(
     return deleted_meal
 
 # --- Meal Serving System ---
-@serving_router.post("/{meal_id}", response_model=schemas.MealServingLogSchema) # Path o'zgardi, /serve endi prefix
+@serving_router.post("/{meal_id}", response_model=schemas.MealServingLogSchema)
 def serve_meal_route(
     meal_id: int,
-    serve_request: schemas.ServeMealRequest, # So'rov tanasidan porsiya sonini olish
+    serve_request: schemas.ServeMealRequest,
     db: Session = Depends(get_db),
     current_user: database.User = Depends(security.get_current_chef_user)
 ):
@@ -591,7 +573,7 @@ def serve_meal_route(
         db, 
         meal_id=meal_id, 
         user_id=current_user.id, 
-        portions_to_serve=serve_request.portions_to_serve # Porsiya sonini uzatish
+        portions_to_serve=serve_request.portions_to_serve 
     )
     if not success or not log_entry:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
@@ -610,7 +592,7 @@ def calculate_portions_for_meal_route(
     portions = utils.calculate_portions_for_meal(db, meal_id=meal_id)
     return schemas.PortionCalculationResponse(meal_id=meal.id, meal_name=meal.name, calculable_portions=portions)
 
-@portions_router.get("/all/all/calculate", response_model=List[schemas.PortionCalculationResponse]) # /all/all -> /all
+@portions_router.get("/all/all/calculate", response_model=List[schemas.PortionCalculationResponse])
 def calculate_portions_for_all_meals_route(
     db: Session = Depends(get_db),
     current_user: database.User = Depends(security.get_authenticated_user)
@@ -618,7 +600,7 @@ def calculate_portions_for_all_meals_route(
     return utils.calculate_portions_for_all_meals(db)
 
 # --- Reports and Visualization Data Endpoints ---
-@reports_router.get("/ingredient_consumption", response_model=List[schemas.DailyConsumptionDataPoint]) # Javob modelini aniqlashtirdim
+@reports_router.get("/ingredient_consumption", response_model=List[schemas.DailyConsumptionDataPoint]) 
 def ingredient_consumption_report_route(
     product_id: int,
     start_date: datetime.date = Query(...),
@@ -626,25 +608,7 @@ def ingredient_consumption_report_route(
     db: Session = Depends(get_db),
     current_user: database.User = Depends(security.get_current_manager_user)
 ):
-    # ... (mavjud kod) ...
     consumption_data_list = utils.get_ingredient_consumption_data(db, product_id, start_date, end_date)
-    # Bu yerda utils.get_ingredient_consumption_data List[Dict] qaytaradi.
-    # Agar schemas.IngredientConsumption qaytarish kerak bo'lsa, konvertatsiya qilish kerak.
-    # Hozircha List[Dict] qoldiramiz, chunki schemas.IngredientConsumption bitta mahsulot uchun,
-    # lekin utils.get_ingredient_consumption_data kunlik sarfni qaytaradi.
-    # Yaxshisi, schemas.IngredientConsumption ni o'zgartirish yoki javobni List[dict] qoldirish.
-    # Hozircha, utils.get_ingredient_consumption_data ni List[schemas.IngredientConsumptionDataPoint] kabi qaytaradigan qilish kerak.
-    # Yoki schemas.IngredientConsumption ni List[ConsumptionDataPoint] ni o'z ichiga oladigan qilish kerak.
-    # Keling, schemas.IngredientConsumption ni List[dict] ga moslaymiz yoki javobni List[dict] qoldiramiz.
-    # schemas.py da IngredientConsumption ni o'zgartirdim:
-    # class IngredientConsumptionDataPoint(BaseModel):
-    #     date: str
-    #     consumed_grams: float
-    # class IngredientConsumptionReport(BaseModel):
-    #     product_name: str
-    #     consumption_series: List[IngredientConsumptionDataPoint]
-    # Lekin hozirgi utils.get_ingredient_consumption_data to'g'ridan-to'g'ri List[Dict] qaytaradi, Chart.js uchun qulay.
-    # Response modelini List[Dict] ga o'zgartiramiz.
     product = crud.get_product(db, product_id)
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Product with ID {product_id} not found.")
@@ -655,7 +619,7 @@ audit_logs_router = APIRouter(prefix="/audit-logs", tags=["Audit Logs Management
 @audit_logs_router.get("/", response_model=List[schemas.AuditLogSchema], dependencies=[Depends(security.get_current_admin_user)])
 async def read_audit_logs(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500), # Limitni chegaralash
+    limit: int = Query(100, ge=1, le=500), 
     user_id: Optional[int] = Query(None),
     username: Optional[str] = Query(None, min_length=1, max_length=100),
     method: Optional[str] = Query(None, min_length=1, max_length=10),
@@ -665,13 +629,12 @@ async def read_audit_logs(
     end_date: Optional[datetime.datetime] = Query(None),
     db: Session = Depends(get_db)
 ):
-    # crud.py da get_audit_logs funksiyasini yaratish kerak bo'ladi
     logs = crud.get_audit_logs(
         db, 
         skip=skip, 
         limit=limit,
         user_id=user_id,
-        username_contains=username, # username bo'yicha qisman qidiruv
+        username_contains=username,
         method=method,
         endpoint_path_contains=endpoint_path_contains,
         status_code=status_code,
@@ -683,7 +646,7 @@ async def read_audit_logs(
 @reports_router.get("/product_delivery_history/{product_id}", response_model=List[schemas.ProductDelivery]) # product_id ni path ga o'tkazdim
 def product_delivery_history_route(
     product_id: int,
-    commons: Annotated[CommonQueryParams, Depends()], # Pagination qo'shish mumkin
+    commons: Annotated[CommonQueryParams, Depends()],
     db: Session = Depends(get_db),
     current_user: database.User = Depends(security.get_current_manager_user)
 ):
@@ -707,7 +670,7 @@ def get_all_meal_serving_logs_route(
     commons: Annotated[CommonQueryParams, Depends()],
     user_id: Optional[int] = Query(None),
     meal_id: Optional[int] = Query(None),
-    start_date_str: Optional[str] = Query(None, alias="startDate"), # Frontend dan keladigan nomga moslash
+    start_date_str: Optional[str] = Query(None, alias="startDate"), 
     end_date_str: Optional[str] = Query(None, alias="endDate"),
     db: Session = Depends(get_db),
     current_user: database.User = Depends(security.get_current_manager_user)
@@ -734,7 +697,6 @@ def low_stock_alerts_route(
     return utils.check_low_stock_alerts(db, minimum_threshold_grams=minimum_threshold)
 @alerts_router.get("/potential_abuse", 
                    response_model=Optional[schemas.PotentialAbuseAlert],
-                   # Swagger uchun namunaviy javoblarni yaxshilash mumkin:
                    responses={
                        200: {
                            "description": "Potential abuse alert data or null if no abuse detected.",
@@ -743,7 +705,7 @@ def low_stock_alerts_route(
                                    "examples": {
                                        "alert_found": {
                                            "summary": "Abuse Detected",
-                                           "value": { # schemas.PotentialAbuseAlert namunasi
+                                           "value": { 
                                                 "month": "2023-05",
                                                 "prepared_portions": 1000,
                                                 "potential_portions_at_month_end": 500,
@@ -753,7 +715,7 @@ def low_stock_alerts_route(
                                        },
                                        "no_alert": {
                                            "summary": "No Abuse Detected",
-                                           "value": None # Yoki {} agar frontend shuni kutsa, lekin None yaxshiroq
+                                           "value": None
                                        }
                                    }
                                }
@@ -770,24 +732,18 @@ def potential_abuse_alert_route(
     alert_data = utils.get_potential_abuse_alert(db, year, month, threshold_percentage=threshold)
     
     if not alert_data:
-        # Agar utils.get_potential_abuse_alert None qaytarsa, endpoint ham None qaytaradi.
-        # FastAPI buni to'g'ri JSON null ga aylantiradi (yoki HTTP 204 No Content, agar hech nima qaytarmasangiz).
-        # Aniqroq bo'lishi uchun JSONResponse(content=None) dan foydalanish mumkin.
-        return None # Yoki return JSONResponse(content=None, status_code=200)
-        # Yoki hech nima qaytarmaslik, FastAPI o'zi hal qiladi:
-        # return 
-        # Lekin None qaytarish Optional response modeliga eng mos keladi.
+        return None 
 
     return alert_data
-@reports_router.get("/deliveries/all", response_model=List[schemas.ProductDelivery]) # Yoki boshqa router
-async def read_all_product_deliveries( # Async qildim, agar crud funksiyangiz async bo'lmasa, bu ham sync bo'lishi mumkin
-    commons: Annotated[CommonQueryParams, Depends()], # Pagination uchun
+@reports_router.get("/deliveries/all", response_model=List[schemas.ProductDelivery])
+async def read_all_product_deliveries(
+    commons: Annotated[CommonQueryParams, Depends()],
     db: Session = Depends(get_db),
-    current_user: database.User = Depends(security.get_current_manager_user) # Ruxsatni tekshirish
+    current_user: database.User = Depends(security.get_current_manager_user) 
 ):
     deliveries = crud.get_product_deliveries(
         db, 
-        product_id=None, # Barcha mahsulotlar uchun
+        product_id=None, 
         skip=commons.skip, 
         limit=commons.limit
     )
@@ -806,4 +762,4 @@ app.include_router(audit_logs_router)
 if __name__ == "__main__":
     import uvicorn
     print("MAIN.PY: Uvicorn ishga tushirilmoqda http://127.0.0.1:8000")
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) # `app.main:app` o'rniga `main:app` agar shu faylni ishga tushirsangiz
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
