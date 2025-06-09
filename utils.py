@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-import database, crud, schemas # Yoki app.database va h.k.
+import database, crud, schemas 
 from typing import List, Dict, Tuple, Optional
 import datetime
 
